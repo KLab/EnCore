@@ -11,20 +11,30 @@
 #define	MAX_TASK_COUNT			(256)
 
 // Maximum number of core.		(internal limit is 32 due to API implementation internal)
-#define MAX_THREAD_COUNT		(4)
+#define MAX_THREAD_COUNT		(8)
 
 // Maximum number of tasks that stay alive between frames.
 #define MAX_TASK_PERSISTANT		(2048)
 
-// TODO
+// Dependancies table size in entry.
 #define MAX_DEPENDANCE_ENTRIES	(3500)
 
+// -------------------------------------------------------
+// Forward declaration
+// -------------------------------------------------------
+class Task;
+
+union TaskParam {
+	void*	ptr;
+	u32	ui;
+	s32	i;
+	u16	u16[2];
+	u8	u8[4];
+};
 
 // -------------------------------------------------------
 //    User callback customization function.
 // -------------------------------------------------------
-class Task;
-
 /**
 	Optionnal User function associated when creating/destroying a worker thread.
 
@@ -64,28 +74,22 @@ typedef	void*	(*handleWorkerUserContext)	(u32 index, void* oldContext);
 	shared between multiple thread in a locked fashion. It will seriously impact your performance as the spy function is called
 	for EACH TASK executed in EACH WORKER.
  */
-typedef void	(*spyWorkerFunc)			(void* spyCtx, u32 workerIndex, Task* pTask);
-
+typedef void	(*spyWorkerFunc)			(void* spyCtx, u32 workerIndex, Task* pTask, TaskParam* param);
 
 /** C++ type Execution function for a task */
 class CppCall {
-	void execFunc		(u8 worker);
+	void execFunc		(u8 worker, TaskParam* pParam);
 };
-typedef bool	(CppCall::*execFunc)		(u8 worker);
+typedef bool	(CppCall::*execFunc)		(u8 worker, TaskParam* pParam);
 
 /** Error function */
-// TODO : future feature, api to use it.
-// typedef void	(*errorFunc)				(u32 worker, u32 errCode);
+typedef void	(*errorFunc)				(u8 worker, u32 errCode);
 
 // ============================================================================
-// APIs
+// APIs Constant
 // ============================================================================
 
 static const int EC_ALL	= 255;	// Used for ALL group or ALL workers when possible.
-
-// ============================================================================
-// Task execution dependancy & control
-// ============================================================================
 
 // ============================================================================
 // Workers Control
@@ -98,7 +102,7 @@ void	WRK_SetGroup			(u8 worker, u8 groupID);
 /** Get the state of a worker */
 u8		WRK_GetState			(u8 worker);
 /** Push a task to a worker */
-bool	WRK_PushExecute			(u8 worker, Task* task);
+bool	WRK_PushExecute			(u8 worker, Task* task, TaskParam* arrayParam);
 /** Get user context associated with a worker (See WRK_CreateWorkers function)) */
 void*	WRK_GetUserContext		(u8 worker);
 /** When a task is not complete and is waiting for an asynchronous signal/response, instead of doing a while loop that will lock the worker,
@@ -118,7 +122,7 @@ void*	WRK_GetUserContext		(u8 worker);
 	When not in fast mode, the current task is pushed back at the END of the queue,
 	thus, response time will be delayed further.
  */
-void	WRK_TaskYield			(u8 worker, u8 fastMode);
+void	WRK_TaskYield			(u8 worker, Task* task, TaskParam* arrayParam, u8 mode);
 /** Return the number of workers currently sleeping */
 u8		WRK_GetSleepingCount	();
 
@@ -130,61 +134,27 @@ bool	WRK_CreateWorkers		(u32 count, bool includeThisThread, u32 stackSize, handl
 void	WRK_ShutDown			(u8 worker_or_all, bool async); // 255 = ALL
 void	WRK_SetSpy				(spyWorkerFunc cbSpyFunc, void* spyContext);
 u8		WRK_GetHWWorkerCount	();
-void	WRK_AllowIdle			(bool idling);
+void	WRK_AllowIdle			(bool idling, u8 worker = EC_ALL);
 
 // Init & Release library.
-bool	WRKLIB_Init				();
+bool	WRKLIB_Init				(errorFunc errFunc = 0);
 void	WRKLIB_Release			();
 
 }
 
-//==============================================================================
-// Private Header
-//==============================================================================
 #include "EC_MultiTaskingPlatform.h"
 
-#define EC_ASSERT(a)		EC_ASSERT_MSG(a,"Error")
-#define EC_ASSERTALWAYS		EC_ASSERT(false)
-
-#define MAX_TASK_COUNT_INTERNAL		(MAX_TASK_COUNT+1)
-
-#define NULL_IDX			(0xFFFF)
-
-bool CreateThread	(u8 workerIndex, u32 stackSize, void* context);
-void RunThread		(void* context);
-
-// Avoid visibility from user & into documentation.
+/** Generic Critical section object */
 class TLock {
 public:
 	TLock		() { }
 	~TLock		() { }
-//inline
-//void TLock::Lock()				{	EnterCriticalSection(&m_handle);									}
-//inline
-//void TLock::Unlock()			{	LeaveCriticalSection(&m_handle);									}
 	void Lock	();
 	void Unlock	();
 
 	bool init();
 	void release();
 	LXLOCK_HANDLE	m_handle;
-};
-
-typedef u16	TaskSlot;
-
-struct DependancyEntry {
-	TaskSlot	m_prev;
-	TaskSlot	m_next;
-
-	s16			m_lprev;
-	s16			m_lnext;
-
-	s16			m_sprev;
-	s16			m_snext;
-
-	TaskSlot	m_self;
-	Task*		m_pTask;
-	Task*		m_pToTask;
 };
 
 /**
@@ -205,7 +175,6 @@ public:
 private:
 	static const u32	ATTRB_NONSPLITTABLE	= 0x00;
 	static const u32	ATTRB_SPLITTABLE	= 0x01;
-	static const u32	ATTRB_SUICIDE		= 0x02; /* Ask for the task to be destroyed when execution is complete : execute once model */
 	static const u32	ATTRB_YIELD			= 0x04;
 	// 4,8,10,20,40 are free for now.
 	static const u32	ATTRB_SPLITTED		= 0x80;
@@ -217,26 +186,23 @@ public:
 	/* Note : used by WRK_TaskYield */
 	inline void  TSK_SetYield			()				{ m_attribute |= Task::ATTRB_YIELD;		}
 	inline void  TSK_UnsetYield			()				{ m_attribute &=~Task::ATTRB_YIELD;		}
-			
+
 	/** This task is waiting for the task pTask to end to perform its execution.
 		Note: it is possble for a task to wait for multiple tasks							*/
-			bool TSK_WaitingForTask		(Task* pTask);
+//			bool TSK_WaitingForTask		(Task* pTask, TaskParam* pParam);
 
 	/** pTask is waiting for this task to end to perform its execution.
 		Note: it is possble for a task to wait for multiple tasks							*/
-	inline	bool TSK_WaitingForMe		(Task* pTask)	{ return pTask->TSK_WaitingForTask(this);}
+//	inline	bool TSK_WaitingForMe		(Task* pTask)	{ return pTask->TSK_WaitingForTask(this);}
 
 	/** Remove the dependancy between this task and the wait for the end of pTask.			*/
-			void TSK_UnWaitingForTask	(Task* pTask);
+//			void TSK_UnWaitingForTask	(Task* pTask);
 
 	/** Remove the dependancy between pTask and the wait for the end of this task.			*/
-	inline	void TSK_UnWaitingForMe		(Task* pTask)	{ pTask->TSK_UnWaitingForTask(this);	}
+//	inline	void TSK_UnWaitingForMe		(Task* pTask)	{ pTask->TSK_UnWaitingForTask(this);	}
 
 	/** Remove all dependancies in both directions											*/
-			void TSK_ClearDependencies	();
-	/** Task is destroyed after execution													*/
-	inline	void TSK_Suicide			()				{ m_attribute |= ATTRB_SUICIDE;			}
-
+//			void TSK_ClearDependencies	();
 protected:
 	/**
 			Must be called inside the constructor to define if the task is splittable or not.
@@ -248,28 +214,28 @@ protected:
 	inline  u32* TSK_GetStreamInfo		() { return &m_streamAmount; }
 	inline	u32	 TSK_GetSplitSize		() { return m_splitSize;     }
 			u32  TSK_GetSplit			(u32* start, u32* end);
+	inline  void TSK_CompleteSplitBlock	() { atomicDecrement(&m_splitCount); }
 
 private:
-			void FinishedExecute		(Task* pTask, WorkThread* pWorker);
+			void FinishedExecute		(void* pTask, WorkThread* pWorker);
 
 	u32			m_streamAmount;
 	u32			m_streamGranularity;
 	u32			m_splitSize;
 	u32			m_taskID;
+	volatile
+	u32			m_splitCount;
 
-	TLock		
-				m_dependancyLock;
-	TaskSlot	m_scheduleSlot;
-	DependancyEntry*	
-				m_dependancySlotFrom;
-	DependancyEntry*	
-				m_dependancySlotTo;
+	TLock		m_dependancyLock;
+	u32			m_scheduleSlot;
+	void*		m_dependancySlotFrom;
+	void*		m_dependancySlotTo;
+
 	execFunc	m_runFunc;
 
 	u16			m_dependantFromCount;
 	u16			m_dependantToCount;
 	u16			m_executeRemainCount;
-	u16			m_splitCount;
 	u16			m_currSplit;
 	u8			m_attribute;
 };

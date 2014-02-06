@@ -39,4 +39,7 @@ private:
 	LXTHREAD_HANDLE	m_osThread;
 };
 
+inline
+void atomicDecrement(volatile u32* pValue);
+
 #endif
