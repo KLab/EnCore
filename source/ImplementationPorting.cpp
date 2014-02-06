@@ -1,5 +1,6 @@
 #include "EC_MultiTaskingInternal.h"
 #include <Windows.h>
+#include <intrin.h>
 
 // ============================================================================
 //   Multithreading
@@ -25,7 +26,7 @@ bool CreateThread(u8 workerIndex, u32 stackSize, void* context) {
 // ============================================================================
 
 // [Public]
-u8	WRK_GetHWWorkerCount	() {
+u8	WRK_GetHWWorkerCount() {
 	SYSTEM_INFO si;
 	GetSystemInfo( &si );
 	return (u8)si.dwNumberOfProcessors;
@@ -50,3 +51,9 @@ void TEventLock::WaitEvent()	{	WaitForSingleObject( m_handle , INFINITE );						
 void TEventLock::SendEvent()	{	SetEvent(m_handle);													}
 void TEventLock::release()		{   if (m_handle) { CloseHandle(m_handle); m_handle = 0; }				}
 bool TEventLock::init()			{	return (NULL != (m_handle = CreateEvent(NULL,false,false,NULL)));	}
+
+// --- Atomic Decrement Counter ---
+inline
+void atomicDecrement(volatile u32* pValue) {
+	_InterlockedDecrement((volatile long*)pValue);
+}
