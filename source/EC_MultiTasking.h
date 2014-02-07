@@ -189,7 +189,7 @@ public:
 
 	/** This task is waiting for the task pTask to end to perform its execution.
 		Note: it is possble for a task to wait for multiple tasks							*/
-//			bool TSK_WaitingForTask		(Task* pTask, TaskParam* pParam);
+			bool TSK_WaitingForTask		(Task* pTask, TaskParam* pParam);
 
 	/** pTask is waiting for this task to end to perform its execution.
 		Note: it is possble for a task to wait for multiple tasks							*/

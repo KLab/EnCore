@@ -865,7 +865,6 @@ void Task::TSK_SetSplittable() {
 	m_attribute = ATTRB_SPLITTABLE;
 }
 
-/*
 bool Task::TSK_WaitingForTask(Task* pTask, TaskParam* pParam) {
 	TaskSlot slot = AllocDependant();
 
@@ -877,7 +876,7 @@ bool Task::TSK_WaitingForTask(Task* pTask, TaskParam* pParam) {
 		pEntry->m_lprev = 0;
 		pEntry->m_sprev = 0;
 		if (m_dependancySlotFrom) {
-			pEntry->m_lnext = m_dependancySlotFrom->m_self - pEntry->m_self; // End
+			pEntry->m_lnext = ((DependancyEntry*)m_dependancySlotFrom)->m_self - pEntry->m_self; // End
 		} else {
 			pEntry->m_lnext = 0;
 		}
@@ -895,7 +894,7 @@ bool Task::TSK_WaitingForTask(Task* pTask, TaskParam* pParam) {
 		// Do the link in 'pTask'
 		//
 		if (pTask->m_dependancySlotTo) {
-			pEntry->m_snext = pTask->m_dependancySlotTo->m_self - pEntry->m_self; // End
+			pEntry->m_snext = ((DependancyEntry*)(pTask->m_dependancySlotTo))->m_self - pEntry->m_self; // End
 		} else {
 			pEntry->m_snext = 0;
 		}
@@ -909,6 +908,7 @@ bool Task::TSK_WaitingForTask(Task* pTask, TaskParam* pParam) {
 	}
 }
 
+/*
 void Task::TSK_UnWaitingForTask	(Task* pTask) {
 	// TODO IMPLEMENT
 	EC_ASSERT_MSG(false, "TODO IMPLEMENT");
