@@ -80,7 +80,7 @@ typedef void	(*spyWorkerFunc)			(void* spyCtx, u32 workerIndex, Task* pTask, Tas
 class CppCall {
 	void execFunc		(u8 worker, TaskParam* pParam);
 };
-typedef bool	(CppCall::*execFunc)		(u8 worker, TaskParam* pParam);
+typedef void	(CppCall::*execFunc)		(u8 worker, TaskParam* pParam);
 
 /** Error function */
 typedef void	(*errorFunc)				(u8 worker, u32 errCode);
@@ -102,7 +102,7 @@ void	WRK_SetGroup			(u8 worker, u8 groupID);
 /** Get the state of a worker */
 u8		WRK_GetState			(u8 worker);
 /** Push a task to a worker */
-bool	WRK_PushExecute			(u8 worker, Task* task, TaskParam* arrayParam);
+bool	WRK_PushExecute			(u8 worker, Task* task, TaskParam* arrayParam = 0);
 /** Get user context associated with a worker (See WRK_CreateWorkers function)) */
 void*	WRK_GetUserContext		(u8 worker);
 /** When a task is not complete and is waiting for an asynchronous signal/response, instead of doing a while loop that will lock the worker,
