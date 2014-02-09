@@ -53,7 +53,6 @@ void TEventLock::release()		{   if (m_handle) { CloseHandle(m_handle); m_handle 
 bool TEventLock::init()			{	return (NULL != (m_handle = CreateEvent(NULL,false,false,NULL)));	}
 
 // --- Atomic Decrement Counter ---
-inline
-void atomicDecrement(volatile u32* pValue) {
-	_InterlockedDecrement((volatile long*)pValue);
+u32 atomicDecrement(volatile u32* pValue) {
+	return _InterlockedDecrement((volatile long*)pValue);
 }

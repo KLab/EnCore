@@ -89,7 +89,11 @@ typedef void	(*errorFunc)				(u8 worker, u32 errCode);
 // APIs Constant
 // ============================================================================
 
-static const int EC_ALL	= 255;	// Used for ALL group or ALL workers when possible.
+static const int EC_ALL							= 255;	// Used for ALL group or ALL workers when possible.
+/** Tried to push in a full list inside a task */
+static const u32 ERR_WORKER_TASKLIST_FULL		= 1;
+/** All the dependancy slot are used. See compile constants */
+static const u32 ERR_NO_FREE_DEPENDANCY_SLOT	= 2;
 
 // ============================================================================
 // Workers Control
@@ -148,12 +152,12 @@ void	WRKLIB_Release			();
 class TLock {
 public:
 	TLock		() { }
-	~TLock		() { }
+	~TLock		() { release(); }
 	void Lock	();
 	void Unlock	();
-
-	bool init();
+	bool init	();
 	void release();
+private:
 	LXLOCK_HANDLE	m_handle;
 };
 
@@ -187,6 +191,8 @@ public:
 	inline void  TSK_SetYield			()				{ m_attribute |= Task::ATTRB_YIELD;		}
 	inline void  TSK_UnsetYield			()				{ m_attribute &=~Task::ATTRB_YIELD;		}
 
+	inline  void TSK_SetBlockCount		(u32 count)		{ m_splitCount = count; } 
+
 	/** This task is waiting for the task pTask to end to perform its execution.
 		Note: it is possble for a task to wait for multiple tasks							*/
 			bool TSK_WaitingForTask		(Task* pTask, TaskParam* pParam);
@@ -196,14 +202,17 @@ public:
 //	inline	bool TSK_WaitingForMe		(Task* pTask)	{ return pTask->TSK_WaitingForTask(this);}
 
 	/** Remove the dependancy between this task and the wait for the end of pTask.			*/
-//			void TSK_UnWaitingForTask	(Task* pTask);
+			void TSK_UnWaitingForTask	(Task* pTask);
 
 	/** Remove the dependancy between pTask and the wait for the end of this task.			*/
-//	inline	void TSK_UnWaitingForMe		(Task* pTask)	{ pTask->TSK_UnWaitingForTask(this);	}
+	inline	void TSK_UnWaitingForMe		(Task* pTask)	{ pTask->TSK_UnWaitingForTask(this);	}
 
 	/** Remove all dependancies in both directions											*/
-//			void TSK_ClearDependencies	();
+			void TSK_ClearDependencies	();
 protected:
+			bool TSK_Init				() {
+				return m_dependancyLock.init();
+			}
 	/**
 			Must be called inside the constructor to define if the task is splittable or not.
 	 */
@@ -214,8 +223,8 @@ protected:
 	inline  u32* TSK_GetStreamInfo		() { return &m_streamAmount; }
 	inline	u32	 TSK_GetSplitSize		() { return m_splitSize;     }
 			u32  TSK_GetSplit			(u32* start, u32* end);
-	inline  void TSK_CompleteSplitBlock	() { atomicDecrement(&m_splitCount); }
-
+protected:
+	inline  u32  TSK_CompleteBlock		() { return atomicDecrement(&m_splitCount); }
 private:
 			void FinishedExecute		(void* pTask, WorkThread* pWorker);
 
@@ -225,8 +234,9 @@ private:
 	u32			m_taskID;
 	volatile
 	u32			m_splitCount;
-
+public:
 	TLock		m_dependancyLock;
+private:
 	u32			m_scheduleSlot;
 	void*		m_dependancySlotFrom;
 	void*		m_dependancySlotTo;

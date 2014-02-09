@@ -113,6 +113,10 @@ void RunThread(void* p) {
 	((WorkThread*)p)->Run();
 }
 
+void defaultErrorSystem(u8 worker, u32 errorCode) {
+	// Silent error system by default.
+}
+
 // ============================================================================
 //   Global Variable and context.
 // ============================================================================
@@ -120,7 +124,7 @@ handleWorkerUserContext g_userContextFunc	= NULL;
 u32						g_userStackSize		= 0;
 u32						g_ThreadCount		= 0;
 spyWorkerFunc			g_spyFunc			= NULL;
-errorFunc				g_errFunc			= NULL;
+errorFunc				g_errFunc			= defaultErrorSystem;
 void*					g_spyCtx			= NULL;
 u8						g_bNeverIdle		= 1;
 WorkThread				g_threads[MAX_THREAD_COUNT];
@@ -514,7 +518,6 @@ bool WorkThread::StealTasks() {
 
 bool WorkThread::UnpopAndSwap(TaskEntry* task) {
 	bool res = true;
-	EC_ASSERT(task->pTask->m_executeRemainCount==0);
 	m_taskArrayLock.Lock();
 	TaskEntry* last = m_taskExecuteStart;
 	if (m_taskExecuteStart <= m_taskExecuteEnd) {
@@ -539,6 +542,8 @@ bool WorkThread::UnpopAndSwap(TaskEntry* task) {
 		*m_taskExecuteStart	= *last;
 		// TODO : roll back all task until attribute is not "yield" waiting for exec.
 		*last				= *task;
+	} else {
+		m_error(m_threadIndex, ERR_WORKER_TASKLIST_FULL);
 	}
 	m_taskArrayLock.Unlock();
 	return res;
@@ -546,9 +551,7 @@ bool WorkThread::UnpopAndSwap(TaskEntry* task) {
 
 bool WorkThread::PushFast(TaskEntry* task) {
 	bool res = true;
-	EC_ASSERT(task->pTask->m_executeRemainCount==0);
 	m_taskArrayLock.Lock();
-
 	if (m_taskExecuteStart <= m_taskExecuteEnd) {
 		m_taskExecuteStart--;
 		if (m_taskExecuteStart < m_taskExecuteArray) {
@@ -568,10 +571,13 @@ bool WorkThread::PushFast(TaskEntry* task) {
 
 	if (res) {
 		*m_taskExecuteStart	= *task;
+	} else {
+		m_error(m_threadIndex, ERR_WORKER_TASKLIST_FULL);
 	}
 	m_taskArrayLock.Unlock();
 	return res;
 }
+
 /*
 bool WorkThread::PushExecute(TaskEntry** pTaskArray, u32 count) {
 	// TODO OPTIMIZE : avoid each lock and process the batch
@@ -589,7 +595,6 @@ bool WorkThread::PushExecute(TaskEntry** pTaskArray, u32 count) {
 
 bool WorkThread::PushExecute(TaskEntry* task) {
 	bool res = true;
-	EC_ASSERT(task->pTask->m_executeRemainCount==0);
 	m_taskArrayLock.Lock();
 	if (m_taskExecuteStart <= m_taskExecuteEnd) {
 		*m_taskExecuteEnd++ = *task;
@@ -611,6 +616,9 @@ bool WorkThread::PushExecute(TaskEntry* task) {
 
 //  TODO : for now signaling is dividing the perf by x10 for task push cost.
 //	m_SleepNotification->SendEvent();
+	if (!res) {
+		m_error(m_threadIndex, ERR_WORKER_TASKLIST_FULL);
+	}
 	return res;
 }
 
@@ -799,8 +807,7 @@ Task::Task()
 
 Task::~Task() {
 	// Remove dependancy from other tasks.
-	/*
-	DependancyEntry* slot = m_dependancySlotTo;
+	DependancyEntry* slot = (DependancyEntry*)m_dependancySlotTo;
 	while (slot) {
 		TSK_UnWaitingForMe(slot->m_pTask.pTask);
 		if (slot->m_lnext) {
@@ -810,7 +817,7 @@ Task::~Task() {
 		}
 	}
 
-	slot = m_dependancySlotFrom;
+	slot = (DependancyEntry*)m_dependancySlotFrom;
 	while (slot) {
 		TSK_UnWaitingForTask(slot->m_pTask.pTask);
 		if (slot->m_lnext) {
@@ -819,7 +826,6 @@ Task::~Task() {
 			slot = NULL;
 		}
 	}
-	*/
 }
 
 void Task::TSK_ResetStreamAmount() {
@@ -904,16 +910,16 @@ bool Task::TSK_WaitingForTask(Task* pTask, TaskParam* pParam) {
 
 		return true;
 	} else {
+		g_errFunc(EC_ALL, ERR_NO_FREE_DEPENDANCY_SLOT);
 		return false;
 	}
 }
 
-/*
 void Task::TSK_UnWaitingForTask	(Task* pTask) {
 	// TODO IMPLEMENT
 	EC_ASSERT_MSG(false, "TODO IMPLEMENT");
 }
-*/
+
 void Task::FinishedExecute(void* pTask, WorkThread* pWorker) {
 	m_dependancyLock.Lock();
 	if ((--m_executeRemainCount) == 0) {
